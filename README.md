@@ -2,6 +2,8 @@
 
 ![](/docs/Images/teaser.png)
 
+*システムは現状非公開
+
 ## Publications / Presentations
 
 - Eiichi Kihara et al., “Dynamic Blur Guidance for Look-Ahead Gaze in VR Ski Training,” ACM Symposium on Virtual Reality Software and Technology (VRST 2026), Paper, 登壇発表予定.
