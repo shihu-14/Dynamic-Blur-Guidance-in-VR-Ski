@@ -1,222 +1,253 @@
-# VRSki-GazeGuidance
+# 視線誘導を用いたVRアルペンスキートレーニングシステム
 
-VRスキー実験におけるコース走行、視線誘導、通過・注視指標、CSV記録を扱うUnityプロジェクトである。
+![](/docs/Images/teaser.png)
 
-## Sceneと設計資料
+## Publications / Presentations
 
-Build Settingsで有効なSceneは次の4つだけである。
+- Eiichi Kihara et al., “Dynamic Blur Guidance for Look-Ahead Gaze in VR Ski Training,” ACM Symposium on Virtual Reality Software and Technology (VRST 2026), Paper, 登壇発表予定.
 
-| Scene | 役割 |
-|---|---|
-| `Settings` | 実験設定とScene起動 |
-| `Test2` | CSV seedで構成したコースをスクロールする本実験 |
-| `Test` | Splineに沿ってPlayerが前進する検証コース |
-| `Calibration` | flag sequenceを用いた視線誤差記録 |
+- 木原 英一ら，「視線誘導を用いたVRアルペンスキートレーニングシステム」，第33回インタラクティブシステムとソフトウェアに関するワークショップ（WISS 2025），デモ発表．
 
-責務境界、PlayerPrefs、起動route、guidance順、seed・CSV互換仕様は[実験アーキテクチャ](docs/experiment-architecture.md)を参照する。テストとCIの実行・運用手順は[Unityテスト・CI運用ガイド](docs/testing-and-ci.md)を参照する。
+## 目的
 
-## Gaussian Blur
+本システムは，**視線誘導を用いたアルペンスキーの技能獲得支援に関する研究**における提案手法のシステムである．
 
-このプロジェクトでは、VRスキー走行中に次の通過対象へ視線を誘導するため、対象方向だけを鮮明に残し、その外側へ一定強度のGaussian Blurを適用する。
+アルペンスキーでは，高速に滑走しながら次の旗門を早期に捉え，滑走ラインやターンを事前に計画する必要があるため，**いつ，どこを見るかという視線の使い方**が重要となる．既存研究では，熟練者は早い段階から2つ先の旗門を見る傾向がある一方，非熟練者はこれから通過する旗門や手前の雪面を見る傾向があることが示されている．
 
-| 要点 | 現行仕様 |
-|---|---|
-| Clear領域の中心 | コース前方にある次の通過対象 `p+1` の方向 |
-| Clear領域 | 中心から固定角度以内。`Test2` sceneでは1° |
-| Clear領域の表示 | full-resolutionの元画像（Original） |
-| Clear領域外の表示 | 位置・距離によらず固定sigmaのBlurred image |
-| Gaussian kernel | `radius = min(ceil(3 * sigmaEffective), 64)` |
-| 描画 | half-resolution Horizontal → half-resolution Vertical → full-resolution Composite |
+そこで本システムでは，**2つ先の旗門へ視線を誘導することで，熟練者に見られる視線の使い方の習得を支援する**．視線誘導には Gaussian Blurを用い，視線誘導対象の旗門の周辺をクリアに保ちながら，それ以外の領域をぼかすことで暗黙的に視線を誘導する．
 
-Quest/Androidで使われる描画経路は、`Mobile` Quality → `Mobile_RPAsset` → `Mobile_Renderer` → Activeな`RadialGaussianBlurRendererFeature` → `RadialGaussianBlurXR.shader`である。
+### なぜ VRを用いるのか
 
-### Clear領域
+実環境では，口頭指導だけで，いつ，どこを見るべきかを滑走中に伝えることは難しく，また，滑走中に適切なタイミングで旗門をハイライト表示するなどの操作をするのも容易ではない．VRでは視覚情報をリアルタイムに制御でき，滑走状況に応じて見るべき対象へ動的に視線誘導できるため．
 
-`DynamicGaussianBlur`は最も近い未通過フラグを`p`、その次を`p+1`として、`p+1`のworld位置をClear領域の中心にする。固定Clear angle以内ではOriginalを表示し、その外側では完成済みのBlurred imageを表示する。
+### なぜ Gaussian Blurを用いるのか
 
-- depthによってClear angleやsigmaを変更しない。
-- inner / outer領域や段階的なsigma補間を使用しない。
-- Horizontal / VerticalではClear判定を行わず、CompositeだけがOriginalとBlurred imageを選択する。
+予備実験では，見るべき旗門をハイライト表示 (下記画像(a))し明示的に誘導したが，表示が煩わしく，特定の場所を見るよう強制されている感覚を与えてしまうという課題があった．
 
-### Gaussian kernel
+一方，Gaussian Blurを用いた暗黙的な視線誘導は，静止画などの分野で利用され，その有効性が示されている．しかし，それがスキーのような高速で周りの環境が変化し，自身も激しく動作するような場面において，その有効性は明らかになっていないため．
 
-UIで指定する`sigmaFull`はfull-resolution pixel単位である。Blur用Textureは縦横1/2解像度なので、kernel計算には次のeffective sigmaを使う。
+## システム構成
 
-$$
-\sigma_{\mathrm{effective}}=\frac{\sigma_{\mathrm{full}}}{2}
-$$
+![](/docs/Images/system-conf.png)
 
-$$
-R=\min\left(\left\lceil3\sigma_{\mathrm{effective}}\right\rceil,64\right)
-$$
+本システムは，スタンドアロン型の VR ヘッドマウントディスプレイ(Meta Quest Pro)と，室内用スキーシミュレータの2つの主要なハードウェアによって構成される．
 
-CPUはsigma変更時だけ、offset $i=0\ldots R$のraw weightを次式で計算する。固定長65要素の配列を再利用し、radius外はゼロにする。
+Meta Quest Pro は，VR空間の描画やアイトラッキング，視線誘導の提示といった主要な処理を実行している．
 
-$$
-w_i=\exp\left(-\frac{i^2}{2\sigma_{\mathrm{effective}}^2}\right)
-$$
+スキーシミュレータは，横方向の加重移動によるスキーの滑走感を再現している．SkyTechSport 社製の President Lux Model を使用している．
 
-Shaderでは事前計算済みweightを参照し、kernel内のweight sumで正規化する。各pixel・各tapで`exp()`を再計算しない。
 
-2次元Gaussianは、
+## ガウシアンブラー (Gaussian Blur)
 
-$$
-G(x,y)=\frac{1}{2\pi\sigma^2}
-\exp\left(-\frac{x^2+y^2}{2\sigma^2}\right)
-=G_x(x)G_y(y)
-$$
+![](/docs/Images/cond.png)
 
-と分離できるため、HorizontalとVerticalの2回の1D convolutionとして計算する。
 
-### Bilinear tap pairing
+### 概要
 
-隣接tap $i$と$i+1$は、次のcombined weightとfractional offsetを使用して1回のlinear samplingへまとめる。
+自分がこれから通過しようとしている旗門を `P0`，その次の旗門 `P1`を視線誘導対象として扱う．`P1`周辺を鮮明に保ち，それ以外の領域をガウシアンブラーでぼかすことで，暗黙的に `P1`へ視線を誘導する.
 
-$$
-W=w_i+w_{i+1}
-$$
+実験では，異なるブラー強度である **Weak（σ = 0.8, 画像b）** と **Strong（σ = 1.3, 画像c）** を比較した．（**画像a** は ブラーなし．黄色く点灯している旗門が `P1`に当たる）カーネル半径は $R = ceil (3\sigma)$ とした．
 
-$$
-d=i+\frac{w_{i+1}}{W}
-$$
+### 実装
 
-正方向と負方向をそれぞれ$+d$、$-d$からsampleする。最後のtapがpairにならない場合は正負を個別にsampleする。半径$R$の1D passにおけるsample数は、中心を含めて概ね次となる。
+Gaussian Blurは，2次元Gaussian重みを縦方向と横方向に分離できる性質を利用して実装している．
+2次元Gaussian重みは次式で定義される．
 
-$$
-1+2\left\lceil\frac{R}{2}\right\rceil
-$$
-
-### 描画フロー
-
-```text
-Original（full resolution）
-  │
-  ├────────────────────────────────────┐
-  ▼                                    │
-Horizontal Gaussian（1/2 resolution）  │
-  - CPU事前計算weight                  │
-  - bilinear tap pairing               │
-  ▼                                    │
-Vertical Gaussian（1/2 resolution）    │
-  ▼                                    │
-Blurred（1/2 resolution）              │
-  │                                    │
-  └────────────────┬───────────────────┘
-                   ▼
-             Composite（full resolution）
-                   ├─ Clear領域 → Original
-                   └─ その他    → Blurredをlinear samplingで拡大
-                   ▼
-             Final（full resolution）
+```math
+G(x,y)
+=
+\frac{1}{2\pi\sigma^2}
+\exp\left(
+-\frac{x^2+y^2}{2\sigma^2}
+\right)
 ```
 
-RenderGraphはHorizontal → Vertical → Compositeの3 passを維持する。`horizontal`と`blurred`だけを縦横1/2解像度、Bilinear、Clampで生成し、OriginalとFinalはfull-resolutionのままにする。`sigmaFull <= 1e-4`ではBlur用RenderGraph処理を追加せずOriginalを維持する。
+指数関数を分解すると，
 
-XR向けの`TEXTURE2D_X`、stereo eye setup、instancing / multiview variant、per-eye view / projection matrixは維持する。
+```math
+G(x,y)
+=
+\left(
+\frac{1}{\sqrt{2\pi}\sigma}
+\exp\left(-\frac{x^2}{2\sigma^2}\right)
+\right)
+\left(
+\frac{1}{\sqrt{2\pi}\sigma}
+\exp\left(-\frac{y^2}{2\sigma^2}\right)
+\right)
+```
 
-実装: [DynamicGaussianBlur.cs](Assets/Scripts/Method/DynamicGaussianBlur.cs)、[RadialGaussianBlurRendererFeature.cs](Assets/Scripts/Method/Rendering/RadialGaussianBlurRendererFeature.cs)、[RadialGaussianBlurXR.shader](Assets/MyAssets/Shader/RadialGaussianBlurXR.shader)
+となるため，
 
-## Performance optimization
+```math
+G(x,y)=G_x(x)G_y(y)
+```
 
-App GPU Timeを主指標として、Meta Quest Pro実機でOVR Metrics ToolのBasic metricsを計測した。同一のコース、走行時間、測定方法を使用し、Clear Angleは1°、Unity 6000.4.5f1 / URP 17.4.0 / Android OpenXR、Render Scaleは1.0とした。
+として，横方向と縦方向の2回の1次元Gaussian重みに分離できる．
+よって 1pixelあたりの計算量を，カーネル幅を $K$ として，
+$O(K^2)$ から $O(K)$ に落とすことができる．
 
-### Blur implementation optimization
+Unity上ではURPのRenderer FeatureとShaderを用いて，
+元画像に横方向と縦方向の Gaussian Blurを順に適用した．
+最後に，`P1` 周辺では元画像を表示し，
+それ以外ではGaussian Blur適用後の画像を表示した，
 
-| 実装 | 変更内容 |
-|---|---|
-| Optimization 1 | Gaussian weightをCPUでsigma変更時だけ事前計算 |
-| Optimization 2 | 隣接tapをbilinear samplingでpair化 |
-| Optimization 4 | Horizontal / Verticalの中間Textureを縦横1/2へdownsampling |
-| Integrated | Optimization 1 + 2 + 4を統合 |
+## 実装上の工夫点
 
-各Optimizationの単体値はBaselineから独立して変更・計測した結果であり、累積結果ではない。コードBaselineは[`5371c56`](https://github.com/shihu-14/VRSki-GazeGuidance/commit/5371c569d9c7b92ddfe7c8b8c8103e0ab5a62fa6)である。
+### 工夫点 1
 
-| 実装 | 条件 | App GPU Time median | p95 | FPS median | GPU Util. median | CPU Util. median | Stale Frames |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Baseline | Blur Off | 16.12 ms | 17.32 ms | 53 | 97% | 16% | 1101 |
-| Baseline | Weak | 27.61 ms | 30.15 ms | 31 | 97% | 11% | 2111 |
-| Baseline | Strong | 29.66 ms | 31.44 ms | 30 | 98% | 10% | 2133 |
-| Optimization 1: Weight precompute | Weak | 27.36 ms | 28.98 ms | 32 | 97% | 11% | 1868 |
-| Optimization 1: Weight precompute | Strong | 30.55 ms | 32.63 ms | 29 | 98% | 11% | 2030 |
-| Optimization 2: Bilinear sampling | Weak | 27.069 ms | 28.240 ms | 32 | 97% | 31% | 1890 |
-| Optimization 2: Bilinear sampling | Strong | 28.694 ms | 30.596 ms | 31 | 98% | 33% | 1923 |
-| Optimization 4: Downsampling | Weak | 25.236 ms | 26.289 ms | 35 | 97% | 33% | 1730 |
-| Optimization 4: Downsampling | Strong | 25.792 ms | 27.432 ms | 34 | 97% | 35% | 1772 |
-| Integrated: Opt1 + Opt2 + Opt4 | Weak | 24.229 ms | 25.031 ms | 36 | 98% | 33% | 1608 |
-| Integrated: Opt1 + Opt2 + Opt4 | Strong | 24.649 ms | 26.343 ms | 36 | 98% | 33% | 1674 |
+Gaussian Blur は Meta Quest Pro 実機では GPU負荷が大きく，
+実際の計測でもフレームレートが大きく低下した．
+VRではフレームレートの低下がユーザー体験の悪化に直結するため，
+Gaussian Blur 処理の高速化と，URPの描画設定をMeta Quest Pro 向けに特化した．
 
-Integrated版とBaselineの比較：
+高速化前と高速化後を比較すると，次のようになった．  
+GPU Timeは，GPUが 1 frameを描画するために要した時間であり，
+値が小さいほどGPU負荷が低い．
 
-| 条件 | Baseline median | Integrated median | 差 | 改善率 |
-|---|---:|---:|---:|---:|
-| Weak | 27.61 ms | 24.229 ms | -3.381 ms | 12.2% |
-| Strong | 29.66 ms | 24.649 ms | -5.011 ms | 16.9% |
+| Blur | GPU Time (前) | GPU Time (後) | 改善率 | FPS (前) | FPS (後) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Weak | `27.61 ms` | `13.77 ms` | `50.0%` | `31` | `62` |
+| Strong | `29.66 ms` | `14.32 ms` | `51.7%` | `30` | `60` |
 
-Optimization 3（Composite fusion）は、最終統合版には含めていない。
+高速化には，以下の手法を用いた．
+| 手法 | 内容 | 改善寄与率（Weak） | 改善寄与率（Strong） |
+| --- | --- | ---: | ---: |
+| MSAAのサンプル数の削減 | 物体の輪郭を滑らかにするMSAAのサンプル数を4xから2xへ削減し，1pixelあたりの描画負荷を抑えた | `35.3%` | `33.7%` |
+| Rendering Pathの簡素化 | URPのRendering Path を Forward+から Forwardへ変更した． | `9.8%` | `8.3%` |
+| Down Sampling | Blur処理時のみ画像の縦横を1/2にDown Samplingし，処理するpixel数を1/4に削減した | `8.6%` | `13.0%` |
+| Bilinear sampling | Gaussian Blurで周辺pixelを読み出す際，隣接する2つのsampleをBilinear補間によって1回にまとめ，texture sampling回数を削減した | `2.0%` | `3.3%` |
+| Gaussian重みの前計算 | Gaussian重みをGPUでpixelごとに毎回計算するのをやめ，CPUで前計算した値をShaderへ渡すようにした | `0.9%` | `1.0%` |
 
-単体計測の補足：
+### 工夫点 2
 
-| 実装 | 条件 | 集計区間 | Samples | GPU frequency median | Battery temperature median |
-|---|---|---:|---:|---:|---:|
-| Optimization 2 | Weak | 8.002〜52.006秒 | 45 | 525 MHz | 28℃ |
-| Optimization 2 | Strong | 4.001〜47.004秒 | 44 | 525 MHz | 28℃ |
-| Optimization 4 | Weak | 6.001〜50.004秒 | 45 | 525 MHz | 28℃ |
-| Optimization 4 | Strong | 4.001〜48.005秒 | 45 | 525 MHz | 28℃ |
+特定のオブジェクトを見ているかどうかの判定を安定してできるように工夫した．当初は，Unityの`Physics.Raycast`を用いて，視線RayがColliderと衝突した位置を取得していた．
 
-画質面では、Weak条件で低解像度化された見え方が目立ち、StrongではBlurに隠れて違和感が比較的目立ちにくかった。これは実機での定性的観察であり、Weakのsigma約0.8はユーザー申告値である。
+```csharp
+if (Physics.Raycast(gazeOrigin, gazeDirection, out hit))
+{
+    gazePosition = hit.potision;
+}
+```
 
-### Rendering configuration optimization
+しかし，この方法では判定結果がColliderの形状に依存し，意図しないObjectとの衝突などによって結果が変化する．また，被験者全員のキャリブレーション後に許容角度を決め，視線に関する指標を再計算する際にも，Raycastを介した判定は冗長であった．
+そこで，滑走者自身から旗門に対するベクトルと視線ベクトルとの角度差が許容範囲に入っているかどうかで判定するようにした，より単純であるが安定する判定方法となった．
 
-BlurコードをIntegrated（Opt1 + Opt2 + Opt4）に固定し、Rendering PathとMSAAだけを変更した。基準はForward+ / MSAA 4xである。
+視線のベクトルを $\mathbf{d}$，
+その基点の位置を $\mathbf{o}$，旗門の位置を $\mathbf{p}$ とすると，旗門への方向ベクトルは，
 
-| Rendering Path | MSAA | Weak GPU median | Strong GPU median | Weak FPS | Strong FPS |
-|---|---:|---:|---:|---:|---:|
-| Forward+ | 4x | 24.229 ms | 24.649 ms | 36 | 36 |
-| Forward | 4x | 21.865 ms | 22.605 ms | 40 | 39 |
-| Forward+ | 2x | 15.680 ms | 16.353 ms | 52 | 50 |
-| Forward | 2x | 13.796 ms | 14.323 ms | 62 | 60 |
+```math
+\mathbf{v}
+=
+\frac{\mathbf{p}-\mathbf{o}}
+{\|\mathbf{p}-\mathbf{o}\|}
+```
 
-補助指標：
+となり，このベクトルと視線ベクトルがなす角を
 
-| Rendering Path | MSAA | 条件 | App GPU Time p95 | GPU Util. median | CPU Util. median | Stale Frames |
-|---|---:|---|---:|---:|---:|---:|
-| Forward+ | 4x | Weak | 25.031 ms | 98% | 33% | 1608 |
-| Forward+ | 4x | Strong | 26.343 ms | 98% | 33% | 1674 |
-| Forward | 4x | Weak | 22.529 ms | 97% | 35% | 1495 |
-| Forward | 4x | Strong | 23.219 ms | 98% | 35% | 1520 |
-| Forward+ | 2x | Weak | 16.724 ms | 97% | 42% | 972 |
-| Forward+ | 2x | Strong | 17.056 ms | 97% | 39% | 1017 |
-| Forward | 2x | Weak | 14.299 ms | 97% | 43% | 486 |
-| Forward | 2x | Strong | 15.113 ms | 97% | 40% | 531 |
+```math
+\theta
+=
+\cos^{-1}(\mathbf{d}\cdot\mathbf{v})
+```
 
-Forward+ / MSAA 4xとの差：
+として，これが設定した許容角度以内であれば，その旗門を見ていると判定する．
 
-| 変更 | Weak差 | Weak改善率 | Strong差 | Strong改善率 |
-|---|---:|---:|---:|---:|
-| Forward+ → Forwardのみ | -2.364 ms | 9.8% | -2.044 ms | 8.3% |
-| MSAA 4x → 2xのみ | -8.549 ms | 35.3% | -8.296 ms | 33.7% |
-| Forward + MSAA 2x | -10.433 ms | 43.1% | -10.326 ms | 41.9% |
+雪面については，視線ベクトルの方程式
 
-各変更の効果は相互作用を含むため、単純には加算できない。
+```math
+\mathbf{x}(t)=\mathbf{o}+t\mathbf{d}
+```
 
-計測ログの条件対応：
+と雪面の方程式
 
-| Rendering Path | MSAA | 条件 | CSV |
-|---|---:|---|---|
-| Forward | 4x | Weak | `20260818_221956.csv` |
-| Forward | 4x | Strong | `20260818_221845.csv` |
-| Forward+ | 2x | Weak | `20260818_223221.csv` |
-| Forward+ | 2x | Strong | `20260818_223332.csv` |
-| Forward | 2x | Weak | `20260818_215914.csv` |
-| Forward | 2x | Strong | `20260818_220027.csv` |
+```math
+\mathbf{n}\cdot(\mathbf{x}-\mathbf{p}_s)=0
+```
 
-Forward / MSAA 4xは、Weakを13.001〜57.005秒、Strongを4.000〜48.003秒で集計した。各45 samples、GPU frequency medianは525 MHz、Battery temperature medianは26℃であった。
+を用いて，両者の交点
 
-Display refresh rateは72 Hzで、1 frameのbudgetは約13.89 msである。Forward / MSAA 2xのApp GPU Time medianは、Weakが13.796 msでbudget内、Strongが14.323 msでわずかに超過した。
+```math
+t=
+\frac{\mathbf{n}\cdot(\mathbf{p}_s-\mathbf{o})}
+{\mathbf{n}\cdot\mathbf{d}}
+```
 
-### Summary
+```math
+\mathbf{x}_{hit}
+=
+\mathbf{o}+t\mathbf{d}
+```
 
-- Blurコード統合により、App GPU Time medianはBaseline比でWeak 12.2%、Strong 16.9%改善した。
-- Forwardへの変更だけで、Forward+ / MSAA 4x比のApp GPU Time medianが約8〜10%改善した。
-- MSAA 2xへの変更だけで約34〜35%、Forward + MSAA 2xでは約42〜43%改善した。
-- 72 Hzのframe budgetは約13.89 msである。
+を計算する．この交点の位置から雪面上のどの位置を見ているかを判定する．
+
+## Scene 構成
+
+設定，動作確認，計測，補正を行うための4つのSceneで構成される．
+
+### Settings
+
+下記の画像で示す環境パラメータおよび実験パラメータを設定するためのScene．設定した値は，他のSceneのコース生成や実験条件にリアルタイムに反映される．
+
+### Recording
+
+実験データを記録するためのScene．滑走中のデータをCSVファイルとして保存する．
+
+主に以下の情報を記録する．
+
+- 計測時刻
+- 視線の起点および視線方向ベクトル
+- 現在の旗門（`P0`）および次の旗門（`P1`）の位置
+- 環境・実験パラメータ
+
+### Test
+
+計測は行わず，視線取得や視線誘導の動作を確認するためのScene. 取得した視線をVR空間上に可視化し，視線が意図した方向に正しく表示されているかを確認できる．
+
+### Calibration
+
+視線計測に生じる誤差を記録するためのScene．視野内の複数の位置に旗門を順に表示し，滑走者はこの旗門を注視してもらう．それによって，旗門の位置と取得した視線から視線の計測誤差を記録する．
+記録したデータは，Recordingにて計測したデータを後から補正するために利用する．
+
+## ファイル構成
+
+```text
+Assets/
+├── Scenes/                    # 設定、実験環境、CalibrationのScene
+├── Scripts/
+│   ├── Common/                # Scene間で共有する小規模な計算処理
+│   ├── Environment/           # 滑走コースの生成処理
+│   ├── Method/                # 各視線誘導手法の実装
+│   ├── Player/                # 移動や旗門の通過判定などの処理
+│   ├── Recording/             # 視線や旗門の通過率などのデータを記録する処理
+│   └── UI/                    # ボタンやスライダーなどのUI要素の実装
+├── Resources/RandomSeeds/     # コース生成時に読み込むシード値
+├── Editor/                    # seed生成などUnity Editor専用処理
+├── MyAssets/                  # プロジェクト固有のmaterial・shader・audio
+└── Tests/                     # EditMode Tests, PlayMode Tests
+Packages/                      # Unity packageの依存関係
+ProjectSettings/               # Unity Editor・build・rendering設定
+scripts/                       # ローカルとCIで共通のUnity検証入口
+.github/workflows/             # GitHub ActionsのUnity validation
+```
+
+## パラメータ調整 UI
+
+システムの設計や実験で滑走してもらうコースを整備する際には，
+自分の進行速度やコースの横幅など，各環境パラメータの値が適切かどうかを繰り返し調整する必要がある．そのため，各パラメータをシステム上から簡単に調整できるようにした．
+
+<table>
+<tr>
+<td width="50%"><img src="docs/Images/environment-settings.png"></td>
+<td width="50%"><img src="docs/Images/experiment-settings.png"></td>
+</tr>
+</table>
+
+| 環境パラメータ | 内容 | 実験パラメータ | 内容 |
+| --- | --- | --- | --- |
+| Curvature | コースの曲がり具合 | Subject ID | 被験者を識別するID |
+| Course Width | コースの横幅 | Condition | 適用する視線誘導の条件 |
+| Slope Angle | コース斜面の傾斜角度 | Seed | 使用するコース生成用の乱数Seed値 |
+| Player FSpeed | 滑走者の進行方向の速度 | Angle Tolerance | 旗門を見ていると判定する際に許容する角度 |
+| Player HSpeed | 滑走者の左右方向への移動速度 |  |  |
+| Camera Height | 滑走者の視点の高さ |  |  |
