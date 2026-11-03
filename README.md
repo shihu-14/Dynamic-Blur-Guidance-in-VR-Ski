@@ -2,7 +2,7 @@
 
 ![](/docs/Images/teaser.png)
 
-*システムは現状非公開
+*システムのソースコードは非公開
 
 ## Publications / Presentations
 
@@ -96,30 +96,28 @@ Unity上ではURPのRenderer FeatureとShaderを用いて，
 
 ## 実装上の工夫点
 
-### 工夫点 1
+### 工夫点1：GPU負荷の軽減
 
-Gaussian Blur は Meta Quest Pro 実機では GPU負荷が大きく，
-実際の計測でもフレームレートが大きく低下した．
-VRではフレームレートの低下がユーザー体験の悪化に直結するため，
-Gaussian Blur 処理の高速化と，URPの描画設定をMeta Quest Pro 向けに特化した．
+Gaussian BlurはMeta Quest Pro実機ではGPU負荷が大きく，フレームレートが大幅に低下した．VRではフレームレートの低下がユーザー体験の悪化に直結するため，Gaussian Blur処理の高速化と，URPの描画設定の最適化に取り組んだ．
 
-高速化前と高速化後を比較すると，次のようになった．  
-GPU Timeは，GPUが 1 frameを描画するために要した時間であり，
-値が小さいほどGPU負荷が低い．
+複数回の計測結果の平均値を比較したところ，最適化によって以下の改善が得られた．
 
-| Blur | GPU Time (前) | GPU Time (後) | 改善率 | FPS (前) | FPS (後) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Weak | `27.61 ms` | `13.77 ms` | `50.0%` | `31` | `62` |
-| Strong | `29.66 ms` | `14.32 ms` | `51.7%` | `30` | `60` |
+| 指標 | 最適化前 | 最適化後 |
+| --- | --- | --- |
+| GPU Time | 29.66 ms | 14.32 ms |
+| FPS | 30 | 60 |
 
-高速化には，以下の手法を用いた．
-| 手法 | 内容 | 改善寄与率（Weak） | 改善寄与率（Strong） |
-| --- | --- | ---: | ---: |
-| MSAAのサンプル数の削減 | 物体の輪郭を滑らかにするMSAAのサンプル数を4xから2xへ削減し，1pixelあたりの描画負荷を抑えた | `35.3%` | `33.7%` |
-| Rendering Pathの簡素化 | URPのRendering Path を Forward+から Forwardへ変更した． | `9.8%` | `8.3%` |
-| Down Sampling | Blur処理時のみ画像の縦横を1/2にDown Samplingし，処理するpixel数を1/4に削減した | `8.6%` | `13.0%` |
-| Bilinear sampling | Gaussian Blurで周辺pixelを読み出す際，隣接する2つのsampleをBilinear補間によって1回にまとめ，texture sampling回数を削減した | `2.0%` | `3.3%` |
-| Gaussian重みの前計算 | Gaussian重みをGPUでpixelごとに毎回計算するのをやめ，CPUで前計算した値をShaderへ渡すようにした | `0.9%` | `1.0%` |
+GPU Timeは，GPUが1フレームを描画するために要した時間であり，値が小さいほどGPU負荷が低い．
+
+最適化には以下の手法を用いた．各手法の改善寄与率を全体の改善具合を100%として示す．
+
+| 手法 | 内容 | 改善寄与率 |
+| --- | --- | --- |
+| MSAAのサンプル数の削減 | MSAAのサンプル数を4xから2xへ削減し，描画負荷を抑えた． | 56.8% |
+| Rendering Pathの簡素化 | URPのRendering PathをForward+からForwardへ変更した． | 14.0% |
+| Down Sampling | Blur処理時のみ画像の縦横を1/2に縮小し，処理するピクセル数を1/4に削減した． | 21.9% |
+| Bilinear Sampling | 隣接する2つのサンプルをBilinear補間によって1回にまとめ，テクスチャのサンプリング回数を削減した． | 5.6% |
+| Gaussian重みの前計算 | Gaussian重みをCPUで前計算し，Shaderへ渡すことでGPUでの重複計算を削減した． | 1.7% |
 
 ### 工夫点 2
 
