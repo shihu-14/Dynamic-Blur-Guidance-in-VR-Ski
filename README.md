@@ -209,28 +209,6 @@ t=
 視線計測に生じる誤差を記録するためのScene．視野内の複数の位置に旗門を順に表示し，滑走者はこの旗門を注視してもらう．それによって，旗門の位置と取得した視線から視線の計測誤差を記録する．
 記録したデータは，Recordingにて計測したデータを後から補正するために利用する．
 
-## ファイル構成
-
-```text
-Assets/
-├── Scenes/                    # 設定、実験環境、CalibrationのScene
-├── Scripts/
-│   ├── Common/                # Scene間で共有する小規模な計算処理
-│   ├── Environment/           # 滑走コースの生成処理
-│   ├── Method/                # 各視線誘導手法の実装
-│   ├── Player/                # 移動や旗門の通過判定などの処理
-│   ├── Recording/             # 視線や旗門の通過率などのデータを記録する処理
-│   └── UI/                    # ボタンやスライダーなどのUI要素の実装
-├── Resources/RandomSeeds/     # コース生成時に読み込むシード値
-├── Editor/                    # seed生成などUnity Editor専用処理
-├── MyAssets/                  # プロジェクト固有のmaterial・shader・audio
-└── Tests/                     # EditMode Tests, PlayMode Tests
-Packages/                      # Unity packageの依存関係
-ProjectSettings/               # Unity Editor・build・rendering設定
-scripts/                       # ローカルとCIで共通のUnity検証入口
-.github/workflows/             # GitHub ActionsのUnity validation
-```
-
 ## パラメータ調整 UI
 
 システムの設計や実験で滑走してもらうコースを整備する際には，
